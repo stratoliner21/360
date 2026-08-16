@@ -1,0 +1,16 @@
+{
+  "name": "360-evaluation-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "360度評価システム バックエンドAPI (Google Apps Script Web App)",
+  "scripts": {
+    "login": "clasp login",
+    "push": "clasp push",
+    "open": "clasp open",
+    "deploy": "clasp deploy",
+    "logs": "clasp logs"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
