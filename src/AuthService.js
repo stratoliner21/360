@@ -19,18 +19,26 @@ function toPublicEmployee(employee) {
 // params: { employeeId, password }
 function login(params) {
   requireFields(params, ['employeeId', 'password']);
+  const employeeId = String(params.employeeId).trim();
 
-  const employee = findEmployeeById(params.employeeId);
+  // 総当たり対策: ロック中は資格情報を照合する前に弾く
+  assertLoginNotLocked(employeeId);
+
+  const employee = findEmployeeById(employeeId);
   // 存在しない社員番号と、無効化された社員は同じエラーメッセージにして
   // 在籍者かどうかの推測を許さない
   if (!employee || !toBool(employee['有効フラグ'])) {
+    recordLoginFailure(employeeId);
     throw new ApiError('INVALID_CREDENTIALS', '社員番号またはパスワードが正しくありません');
   }
 
   const storedPassword = String(employee['パスワード']);
   if (storedPassword !== String(params.password)) {
+    recordLoginFailure(employeeId);
     throw new ApiError('INVALID_CREDENTIALS', '社員番号またはパスワードが正しくありません');
   }
+
+  clearLoginFailures(employeeId);
 
   const token = issueToken(employee['社員番号'], TOKEN_TTL_MINUTES);
   return {
