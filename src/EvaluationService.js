@@ -67,9 +67,9 @@ function submit(params) {
       throw new ApiError('VALIDATION_ERROR', '代表向け評価は代表者に対してのみ送信できます');
     }
   } else {
-    const sameOffice = String(evaluatee['事業所']).trim() === String(evaluator['事業所']).trim();
-    if (!sameOffice && !toBool(evaluatee['代表フラグ'])) {
-      throw new ApiError('VALIDATION_ERROR', '同じ事業所の社員、または代表者のみ評価できます');
+    const sameUnit = String(evaluatee['部署']).trim() === String(evaluator['部署']).trim();
+    if (!sameUnit && !toBool(evaluatee['代表フラグ'])) {
+      throw new ApiError('VALIDATION_ERROR', '同じ部署の社員、または代表者のみ評価できます');
     }
   }
 

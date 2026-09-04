@@ -2,7 +2,8 @@
 
 const SHEET_NAMES = {
   EMPLOYEE: '社員マスタ',
-  OFFICE: '事業所マスタ',
+  DEPARTMENT: '部門マスタ', // 部門ごとの評価基準デフォルト
+  UNIT: '部署マスタ',       // 部署ごとの評価基準上書き(空欄は部門マスタを継承)
   PERIOD: '評価期間マスタ',
   LOG: '評価結果ログ'
 };

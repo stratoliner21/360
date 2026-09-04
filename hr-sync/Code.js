@@ -5,13 +5,18 @@
 // 人事担当者がカスタムメニューを押した時だけ、人事担当者自身のアカウント権限で実行される
 // (要件定義書 5.1・F-11 / データ定義書 v1.1 3章)。
 //
-// 同期対象は 社員番号・氏名・メールアドレス・事業所・有効フラグ の5項目のみ。
-// パスワード・代表フラグは評価専用マスタ側でのみ管理し、この同期では一切変更しない。
+// 同期対象は 社員番号・氏名・メールアドレス・部署・代表フラグ・有効フラグ。
+// パスワードのみ評価専用マスタ側で管理し、この同期では変更しない(新規社員の初回発行を除く)。
 // 360度評価APIの実行アカウントは、この人事原本への読み取り権限を持たない。
+//
+// 部署(旧・事業所)の判定は、人事原本の「部署」シート(部門・部署コード・部署の対応表)を
+// 正とする。以前のようなスクリプトプロパティでの手動対応表(OFFICE_CODE_MAP)は不要。
 
 const SYNC_TARGET_SHEET = '社員マスタ';
 const SYNC_SOURCE_SHEET_NAME_PROPERTY = 'SOURCE_SHEET_NAME';
 const SYNC_DEFAULT_SOURCE_SHEET_NAME = 'シート1';
+const SYNC_DEPARTMENT_SHEET_NAME_PROPERTY = 'SOURCE_DEPARTMENT_SHEET_NAME';
+const SYNC_DEFAULT_DEPARTMENT_SHEET_NAME = '部署';
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -32,39 +37,52 @@ function getEvalMasterSpreadsheetId_() {
   return id;
 }
 
-// 「所属」列の値(例: 101_Campo台之郷) → 事業所マスタの事業所名(例: Campo台之郷) の対応表。
-// 部門・事業所の全体像は要件定義書「13. 未決事項」の通りまだ確定していないため、
-// ここではハードコードせずスクリプトプロパティで管理する。
-// 例: {"101_Campo台之郷":"Campo台之郷","102_Campo大原":"Campo大原"}
-function getOfficeCodeMap_() {
-  const raw = getScriptProperty_('OFFICE_CODE_MAP');
-  if (!raw) {
-    throw new Error(
-      'スクリプトプロパティ OFFICE_CODE_MAP が設定されていません。' +
-        '「所属」列の値→事業所マスタの事業所名の対応表をJSON形式で設定してください'
-    );
-  }
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    throw new Error('OFFICE_CODE_MAP のJSON解析に失敗しました: ' + e.message);
-  }
+// 「代表」とみなす部門名(例: 役員)。この部門に属する部署の社員は代表フラグ=TRUEとして同期する。
+function getRepresentativeDepartmentName_() {
+  return getScriptProperty_('REPRESENTATIVE_DEPARTMENT_NAME') || '役員';
 }
 
-// 「退職」等、退職扱いとみなす在籍状況の文字列一覧。既定は ["退職"]。
-function getResignedStatusValues_() {
-  const raw = getScriptProperty_('RESIGNED_STATUS_VALUES');
-  if (!raw) return ['退職'];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : ['退職'];
-  } catch (e) {
-    return ['退職'];
-  }
+// 「退職」とみなす部門名。この部門に属する部署の社員は有効フラグ=FALSEとして同期する。
+function getResignedDepartmentName_() {
+  return getScriptProperty_('RESIGNED_DEPARTMENT_NAME') || '退職';
 }
 
 function isDryRun_() {
   return (getScriptProperty_('SYNC_DRY_RUN') || 'false').toLowerCase() === 'true';
+}
+
+// 人事原本の「部署」シート(部門・部署コード・部署の3列)を読み、
+// 部署名 → { department, code } のマップを作る。このマップが部署マスタの正となる。
+function readUnitLookup_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = getScriptProperty_(SYNC_DEPARTMENT_SHEET_NAME_PROPERTY) || SYNC_DEFAULT_DEPARTMENT_SHEET_NAME;
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error('人事原本に「部署」シートが見つかりません: ' + sheetName);
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length === 0) return {};
+
+  const headers = values[0].map(function (h) { return String(h).trim(); });
+  const deptIdx = headers.indexOf('部門');
+  const codeIdx = headers.indexOf('部署コード');
+  const unitIdx = headers.indexOf('部署');
+  if (deptIdx === -1 || unitIdx === -1) {
+    throw new Error('「' + sheetName + '」シートに必要な列(部門・部署)が見つかりません');
+  }
+
+  const lookup = {};
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const unitName = row[unitIdx];
+    if (unitName === '' || unitName === null || unitName === undefined) continue;
+    lookup[String(unitName).trim()] = {
+      department: String(row[deptIdx]).trim(),
+      code: codeIdx === -1 ? '' : row[codeIdx]
+    };
+  }
+  return lookup;
 }
 
 function readSourceRows_() {
@@ -84,11 +102,12 @@ function readSourceRows_() {
   const idIdx = idxOf('社員番号');
   const nameIdx = idxOf('氏名');
   const mailIdx = idxOf('メールアドレス');
-  const officeIdx = idxOf('所属');
-  const statusIdx = idxOf('在籍状況');
+  // 「所属」列はシート内に2回登場する(古い単独列と、「所属履歴」グループ内の現在の所属)。
+  // 現在値は後方(最後)に出現する方なので lastIndexOf で取得する。
+  const unitIdx = headers.lastIndexOf('所属');
   const resignIdx = idxOf('退職日');
 
-  if (idIdx === -1 || nameIdx === -1 || officeIdx === -1) {
+  if (idIdx === -1 || nameIdx === -1 || unitIdx === -1) {
     throw new Error('人事原本に必要な列(社員番号・氏名・所属)が見つかりません');
   }
 
@@ -103,24 +122,11 @@ function readSourceRows_() {
       employeeId: String(employeeId).trim(),
       name: row[nameIdx],
       email: mailIdx === -1 ? '' : row[mailIdx],
-      rawOffice: row[officeIdx],
-      status: statusIdx === -1 ? '' : row[statusIdx],
+      rawUnit: row[unitIdx],
       resignedDate: resignIdx === -1 ? '' : row[resignIdx]
     });
   }
   return rows;
-}
-
-// 在籍状況の判定。
-// 1. 「在籍状況」列があれば、その値が退職扱い文字列(既定「退職」)かどうかで判定する
-// 2. その列がなければ「退職日」が入力されているかどうかで判定する(実データはこちらの形式)
-// 人事原本側の運用が変わった場合は、この関数だけを差し替えれば良い構成にしている。
-function deriveActiveFlag_(sourceRow) {
-  if (sourceRow.status) {
-    const resignedValues = getResignedStatusValues_();
-    return resignedValues.indexOf(String(sourceRow.status).trim()) === -1;
-  }
-  return !sourceRow.resignedDate;
 }
 
 function generatePassword_() {
@@ -150,12 +156,14 @@ function sendInitialPasswordEmail_(name, email, employeeId, password) {
 function syncToEvaluationMaster() {
   const ui = SpreadsheetApp.getUi();
   const dryRun = isDryRun_();
+  const representativeDept = getRepresentativeDepartmentName_();
+  const resignedDept = getResignedDepartmentName_();
 
   let sourceRows;
-  let officeMap;
+  let unitLookup;
   try {
     sourceRows = readSourceRows_();
-    officeMap = getOfficeCodeMap_();
+    unitLookup = readUnitLookup_();
   } catch (e) {
     ui.alert('同期を中止しました: ' + e.message);
     return;
@@ -175,7 +183,7 @@ function syncToEvaluationMaster() {
 
   const targetValues = targetSheet.getDataRange().getValues();
   if (targetValues.length === 0) {
-    ui.alert('評価専用マスタの「' + SYNC_TARGET_SHEET + '」シートにヘッダー行がありません。先にヘッダー行(社員番号・氏名・パスワード・メールアドレス・事業所・代表フラグ・有効フラグ)を用意してください');
+    ui.alert('評価専用マスタの「' + SYNC_TARGET_SHEET + '」シートにヘッダー行がありません。先にヘッダー行(社員番号・氏名・パスワード・メールアドレス・部署・代表フラグ・有効フラグ)を用意してください');
     return;
   }
 
@@ -185,7 +193,7 @@ function syncToEvaluationMaster() {
     name: targetHeaders.indexOf('氏名'),
     password: targetHeaders.indexOf('パスワード'),
     email: targetHeaders.indexOf('メールアドレス'),
-    office: targetHeaders.indexOf('事業所'),
+    unit: targetHeaders.indexOf('部署'),
     rep: targetHeaders.indexOf('代表フラグ'),
     active: targetHeaders.indexOf('有効フラグ')
   };
@@ -208,21 +216,27 @@ function syncToEvaluationMaster() {
   const newAccounts = [];
 
   sourceRows.forEach(function (src) {
-    const office = officeMap[String(src.rawOffice).trim()];
-    if (!office) {
-      skipped.push(src.employeeId + '：所属「' + src.rawOffice + '」に対応する事業所名が OFFICE_CODE_MAP にありません');
+    const unitName = String(src.rawUnit).trim();
+    const unitInfo = unitLookup[unitName];
+    if (!unitInfo) {
+      skipped.push(src.employeeId + '：所属「' + src.rawUnit + '」が「部署」シートに見つかりません');
       return;
     }
 
-    const activeFlag = deriveActiveFlag_(src);
+    const isRepresentative = unitInfo.department === representativeDept;
+    const isResignedDept = unitInfo.department === resignedDept;
+    const activeFlag = !isResignedDept && !src.resignedDate;
+
     const existingRow = existingRowByEmployeeId[src.employeeId];
 
     if (existingRow) {
-      // 既存社員: 氏名・メールアドレス・事業所・有効フラグのみ更新。パスワード・代表フラグは維持する
+      // 既存社員: 氏名・メールアドレス・部署・代表フラグ・有効フラグを更新する。
+      // パスワードのみ評価専用マスタ側の既存値を維持する。
       if (!dryRun) {
         targetSheet.getRange(existingRow, col.name + 1).setValue(src.name);
         targetSheet.getRange(existingRow, col.email + 1).setValue(src.email);
-        targetSheet.getRange(existingRow, col.office + 1).setValue(office);
+        targetSheet.getRange(existingRow, col.unit + 1).setValue(unitName);
+        targetSheet.getRange(existingRow, col.rep + 1).setValue(isRepresentative);
         targetSheet.getRange(existingRow, col.active + 1).setValue(activeFlag);
       }
       updated++;
@@ -234,8 +248,8 @@ function syncToEvaluationMaster() {
       newRow[col.name] = src.name;
       newRow[col.password] = password;
       newRow[col.email] = src.email;
-      newRow[col.office] = office;
-      newRow[col.rep] = false;
+      newRow[col.unit] = unitName;
+      newRow[col.rep] = isRepresentative;
       newRow[col.active] = activeFlag;
 
       if (!dryRun) {

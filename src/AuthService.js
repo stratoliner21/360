@@ -10,7 +10,7 @@ function toPublicEmployee(employee) {
   return {
     employeeId: String(employee['社員番号']).trim(),
     name: employee['氏名'],
-    office: employee['事業所'],
+    unit: employee['部署'],
     isRepresentative: toBool(employee['代表フラグ'])
   };
 }
