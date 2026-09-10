@@ -51,6 +51,18 @@ function isDryRun_() {
   return (getScriptProperty_('SYNC_DRY_RUN') || 'false').toLowerCase() === 'true';
 }
 
+// シートの先頭数行から、指定した列名を含む「本当のヘッダー行」を探す。
+// 人事原本の社員一覧は1行目が「所属履歴」等のグループ見出し行になっており、
+// 実際の列名(社員番号 等)は2行目にあるため、1行目決め打ちでは読み違える。
+function findHeaderRowIndex_(values, requiredHeader) {
+  const maxScan = Math.min(values.length, 5);
+  for (let i = 0; i < maxScan; i++) {
+    const row = values[i].map(function (h) { return String(h).trim(); });
+    if (row.indexOf(requiredHeader) !== -1) return i;
+  }
+  return -1;
+}
+
 // 人事原本の「部署」シート(部門・部署コード・部署の3列)を読み、
 // 部署名 → { department, code } のマップを作る。このマップが部署マスタの正となる。
 function readUnitLookup_() {
@@ -64,7 +76,11 @@ function readUnitLookup_() {
   const values = sheet.getDataRange().getValues();
   if (values.length === 0) return {};
 
-  const headers = values[0].map(function (h) { return String(h).trim(); });
+  const headerRowIdx = findHeaderRowIndex_(values, '部署');
+  if (headerRowIdx === -1) {
+    throw new Error('「' + sheetName + '」シートに必要な列(部門・部署)が見つかりません');
+  }
+  const headers = values[headerRowIdx].map(function (h) { return String(h).trim(); });
   const deptIdx = headers.indexOf('部門');
   const codeIdx = headers.indexOf('部署コード');
   const unitIdx = headers.indexOf('部署');
@@ -73,7 +89,7 @@ function readUnitLookup_() {
   }
 
   const lookup = {};
-  for (let i = 1; i < values.length; i++) {
+  for (let i = headerRowIdx + 1; i < values.length; i++) {
     const row = values[i];
     const unitName = row[unitIdx];
     if (unitName === '' || unitName === null || unitName === undefined) continue;
@@ -96,7 +112,11 @@ function readSourceRows_() {
   const values = sheet.getDataRange().getValues();
   if (values.length === 0) return [];
 
-  const headers = values[0].map(function (h) { return String(h).trim(); });
+  const headerRowIdx = findHeaderRowIndex_(values, '社員番号');
+  if (headerRowIdx === -1) {
+    throw new Error('人事原本に必要な列(社員番号)が見つかりません');
+  }
+  const headers = values[headerRowIdx].map(function (h) { return String(h).trim(); });
   const idxOf = function (name) { return headers.indexOf(name); };
 
   const idIdx = idxOf('社員番号');
@@ -112,7 +132,7 @@ function readSourceRows_() {
   }
 
   const rows = [];
-  for (let i = 1; i < values.length; i++) {
+  for (let i = headerRowIdx + 1; i < values.length; i++) {
     const row = values[i];
     const employeeId = row[idIdx];
     // 社員番号が空の行(区切り見出し行「退職済」など)はスキップする
