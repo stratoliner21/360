@@ -1,0 +1,13 @@
+{
+  "name": "360-evaluation-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "360度評価システム 評価入力デスクトップアプリ",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}

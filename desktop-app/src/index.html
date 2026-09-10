@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>360度評価システム</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<section id="screen-login" class="screen">
+  <div class="card login-card">
+    <h1>360度評価システム</h1>
+    <form id="login-form">
+      <label>社員番号
+        <input id="login-employeeId" type="text" autocomplete="username" required>
+      </label>
+      <label>パスワード
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">ログイン</button>
+      <p id="login-error" class="error" hidden></p>
+    </form>
+  </div>
+</section>
+
+<section id="screen-targets" class="screen" hidden>
+  <header class="app-header">
+    <div>
+      <strong id="me-name"></strong> さん(<span id="me-unit"></span>)
+    </div>
+    <button id="logout-btn" class="secondary">ログアウト</button>
+  </header>
+
+  <div id="period-banner" class="period-banner"></div>
+
+  <h2>評価対象者一覧</h2>
+  <ul id="target-list" class="target-list"></ul>
+</section>
+
+<section id="screen-form" class="screen" hidden>
+  <header class="app-header">
+    <button id="back-btn" class="secondary">← 一覧に戻る</button>
+    <h2 id="form-title"></h2>
+  </header>
+  <form id="eval-form" class="card">
+    <div id="form-sections"></div>
+    <button type="submit">送信する</button>
+    <p id="form-error" class="error" hidden></p>
+  </form>
+</section>
+
+<script src="renderer.js"></script>
+</body>
+</html>
