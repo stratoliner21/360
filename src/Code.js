@@ -22,6 +22,8 @@ function doPost(e) {
     switch (action) {
       case 'ping':
         return jsonResponse({ success: true, message: 'pong', now: new Date().toISOString() });
+      case 'getAppUpdate':
+        return jsonResponse(getAppUpdate());
       case 'login':
         return jsonResponse(login(params));
       case 'getMaster':

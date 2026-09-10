@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
+const { pathToFileURL } = require('url');
 
 // config.json はアプリ本体と同じ場所に置く「ポータブル設定」として扱う。
 // URLだけを変えたい場合(デプロイし直した等)、アプリを再ビルドせずこのファイルを
@@ -70,7 +71,80 @@ function postJson(urlString, bodyObj) {
 
 let config;
 
-function createWindow() {
+// 画面コード(index.html / renderer.js / styles.css)の自動更新まわり。
+// Electron本体(exe)やこのファイル・preload.jsは更新対象に含めない。
+const PATCHED_APP_DIR = path.join(app.getPath('userData'), 'patched-app');
+const LOCAL_VERSION_FILE = path.join(app.getPath('userData'), 'app-content-version.txt');
+const PATCHABLE_FILES = ['index.html', 'renderer.js', 'styles.css'];
+
+function readLocalVersion() {
+  try {
+    return fs.readFileSync(LOCAL_VERSION_FILE, 'utf8').trim();
+  } catch (e) {
+    return '0.0.0';
+  }
+}
+
+// 単純なセマンティックバージョン比較(x.y.z形式のみ想定)。remoteがlocalより新しければtrue。
+function isNewerVersion(remote, local) {
+  const toParts = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0);
+  const r = toParts(remote);
+  const l = toParts(local);
+  for (let i = 0; i < Math.max(r.length, l.length); i++) {
+    const rv = r[i] || 0;
+    const lv = l[i] || 0;
+    if (rv !== lv) return rv > lv;
+  }
+  return false;
+}
+
+function resolveIndexPath() {
+  const patchedIndex = path.join(PATCHED_APP_DIR, 'index.html');
+  return fs.existsSync(patchedIndex) ? patchedIndex : path.join(__dirname, 'index.html');
+}
+
+// loadFile はアプリのルートからの相対パスしか想定していないため、userData配下の
+// パッチ済みファイル(絶対パス)も確実に読めるよう file:// URL 経由で読み込む。
+function loadHtmlFile(win, absolutePath) {
+  return win.loadURL(pathToFileURL(absolutePath).toString());
+}
+
+async function setSplashStatus(win, message) {
+  const safe = JSON.stringify(message);
+  await win.webContents.executeJavaScript(
+    'document.getElementById("status").textContent = ' + safe + ';'
+  ).catch(() => {});
+}
+
+// 起動のたびにAPI経由でDrive上の更新パッチを確認し、新しければ適用する。
+// オフライン等でチェックに失敗した場合は、既存(パッチ済み、無ければ同梱)のまま起動する。
+async function checkAndApplyUpdate(win) {
+  const localVersion = readLocalVersion();
+  let statusMessage;
+  try {
+    const res = await postJson(config.apiBaseUrl, { action: 'getAppUpdate' });
+    if (!res.success) {
+      statusMessage = '更新確認をスキップしました';
+    } else if (isNewerVersion(res.version, localVersion)) {
+      fs.mkdirSync(PATCHED_APP_DIR, { recursive: true });
+      PATCHABLE_FILES.forEach((name) => {
+        if (typeof res.files[name] === 'string') {
+          fs.writeFileSync(path.join(PATCHED_APP_DIR, name), res.files[name], 'utf8');
+        }
+      });
+      fs.writeFileSync(LOCAL_VERSION_FILE, res.version, 'utf8');
+      statusMessage = '更新しました(v' + res.version + ')';
+    } else {
+      statusMessage = '最新版です(v' + localVersion + ')';
+    }
+  } catch (err) {
+    statusMessage = '更新確認をスキップしました(オフラインの可能性があります)';
+  }
+  await setSplashStatus(win, statusMessage);
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+}
+
+async function createWindow() {
   const win = new BrowserWindow({
     width: 1024,
     height: 768,
@@ -81,7 +155,10 @@ function createWindow() {
     }
   });
   win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, 'index.html'));
+
+  await loadHtmlFile(win, path.join(__dirname, 'splash.html'));
+  await checkAndApplyUpdate(win);
+  await loadHtmlFile(win, resolveIndexPath());
 }
 
 app.whenReady().then(() => {
