@@ -92,8 +92,22 @@ function listTargets(currentEmployee) {
     });
 }
 
+// F-06: 指定した期間IDについて、自分がすでに評価送信済みの被評価者社員番号一覧を返す
+// (通常評価・代表向け評価のどちらも対象。二重送信防止と同じキーで判定する)
+function listEvaluatedTargetIds(evaluatorId, periodId) {
+  if (!periodId) return [];
+  const { rows } = readSheetAsObjects(SHEET_NAMES.LOG);
+  const evaluator = String(evaluatorId).trim();
+  const period = String(periodId).trim();
+  return rows
+    .filter(function (r) {
+      return String(r['評価者社員番号']).trim() === evaluator && String(r['期間ID']).trim() === period;
+    })
+    .map(function (r) { return String(r['被評価者社員番号']).trim(); });
+}
+
 // action: getMaster
-// params: { token }
+// params: { token, periodId(省略時は受付中の期間を自動選択) }
 function getMaster(params) {
   requireFields(params, ['token']);
   const employee = authenticate(params.token);
@@ -110,11 +124,16 @@ function getMaster(params) {
     );
   }
 
+  const periods = listPeriods();
+  const activePeriodId = params.periodId || (periods.find(function (p) { return p.isOpen; }) || {}).periodId || null;
+
   return {
     success: true,
     employee: toPublicEmployee(employee),
     evaluationItems: buildEvaluationItems(department, unit),
-    periods: listPeriods(),
-    targets: listTargets(employee)
+    periods: periods,
+    activePeriodId: activePeriodId,
+    targets: listTargets(employee),
+    evaluatedTargetIds: listEvaluatedTargetIds(employee['社員番号'], activePeriodId)
   };
 }
