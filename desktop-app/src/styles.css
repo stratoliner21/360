@@ -73,6 +73,15 @@ button.secondary:hover { background: #f0e9e0; }
   margin-top: 12px;
 }
 
+.form-notice {
+  background: #fbeee0;
+  color: #a05a2c;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
 .app-header {
   display: flex;
   align-items: center;

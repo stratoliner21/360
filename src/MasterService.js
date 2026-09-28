@@ -92,18 +92,37 @@ function listTargets(currentEmployee) {
     });
 }
 
-// F-06: 指定した期間IDについて、自分がすでに評価送信済みの被評価者社員番号一覧を返す
+// F-06 + 本人による送信済み内容の確認・再送信用:
+// 指定した期間IDについて、自分がすでに評価送信済みの内容を被評価者社員番号ごとに返す
 // (通常評価・代表向け評価のどちらも対象。二重送信防止と同じキーで判定する)
-function listEvaluatedTargetIds(evaluatorId, periodId) {
-  if (!periodId) return [];
+function getMySubmissionsForPeriod(evaluatorId, periodId) {
+  if (!periodId) return {};
   const { rows } = readSheetAsObjects(SHEET_NAMES.LOG);
   const evaluator = String(evaluatorId).trim();
   const period = String(periodId).trim();
-  return rows
+
+  const result = {};
+  rows
     .filter(function (r) {
       return String(r['評価者社員番号']).trim() === evaluator && String(r['期間ID']).trim() === period;
     })
-    .map(function (r) { return String(r['被評価者社員番号']).trim(); });
+    .forEach(function (r) {
+      const evaluateeId = String(r['被評価者社員番号']).trim();
+      const toScoreArray = function (prefix) {
+        return [1, 2, 3, 4, 5].map(function (i) {
+          const v = r[prefix + i + 'スコア'];
+          return v === '' || v === null || v === undefined ? null : Number(v);
+        });
+      };
+      result[evaluateeId] = {
+        evaluationType: r['評価種別'],
+        scores1: toScoreArray('小項目1-'),
+        scores2: toScoreArray('小項目2-'),
+        freeText1: r['自由記述1'] || '',
+        freeText2: r['自由記述2'] || ''
+      };
+    });
+  return result;
 }
 
 // action: getMaster
@@ -126,6 +145,7 @@ function getMaster(params) {
 
   const periods = listPeriods();
   const activePeriodId = params.periodId || (periods.find(function (p) { return p.isOpen; }) || {}).periodId || null;
+  const existingSubmissions = getMySubmissionsForPeriod(employee['社員番号'], activePeriodId);
 
   return {
     success: true,
@@ -134,6 +154,7 @@ function getMaster(params) {
     periods: periods,
     activePeriodId: activePeriodId,
     targets: listTargets(employee),
-    evaluatedTargetIds: listEvaluatedTargetIds(employee['社員番号'], activePeriodId)
+    evaluatedTargetIds: Object.keys(existingSubmissions),
+    existingSubmissions: existingSubmissions
   };
 }

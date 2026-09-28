@@ -125,7 +125,7 @@
   }
 
   // ---- 評価入力フォーム ----
-  function buildScoreQuestion(name, text) {
+  function buildScoreQuestion(name, text, selectedValue) {
     const wrap = document.createElement('div');
     wrap.className = 'question-block';
 
@@ -143,6 +143,9 @@
       input.name = name;
       input.value = String(v);
       input.required = true;
+      if (selectedValue !== null && selectedValue !== undefined && Number(selectedValue) === v) {
+        input.checked = true;
+      }
       optLabel.appendChild(input);
       optLabel.appendChild(document.createTextNode(String(v)));
       options.appendChild(optLabel);
@@ -151,13 +154,14 @@
     return wrap;
   }
 
-  function buildTextArea(name, labelText) {
+  function buildTextArea(name, labelText, initialValue) {
     const wrap = document.createElement('div');
     wrap.className = 'question-block';
     const label = document.createElement('label');
     setText(label, labelText);
     const textarea = document.createElement('textarea');
     textarea.name = name;
+    textarea.value = initialValue || '';
     label.appendChild(textarea);
     wrap.appendChild(label);
     return wrap;
@@ -172,10 +176,18 @@
       target.name + ' さんへの' + (target.isRepresentative ? '代表向け簡易評価' : '評価') + '入力'
     );
 
+    const existing = (state.master.existingSubmissions || {})[target.employeeId] || null;
+    if (existing) {
+      const notice = document.createElement('p');
+      notice.className = 'form-notice';
+      setText(notice, 'この期間に送信済みの内容を表示しています。内容を確認・修正して送信すると上書きされます。');
+      container.appendChild(notice);
+    }
+
     if (target.isRepresentative) {
       const block = document.createElement('div');
       block.className = 'section-block';
-      block.appendChild(buildTextArea('freeText1', '良いところを教えてください'));
+      block.appendChild(buildTextArea('freeText1', '良いところを教えてください', existing ? existing.freeText1 : ''));
       container.appendChild(block);
     } else {
       const items = state.master.evaluationItems;
@@ -186,14 +198,16 @@
         setText(h3, section.title);
         block.appendChild(h3);
         section.items.forEach((qText, i) => {
-          block.appendChild(buildScoreQuestion('score' + (sIdx + 1) + '_' + (i + 1), qText));
+          const scoresKey = 'scores' + (sIdx + 1);
+          const selectedValue = existing ? existing[scoresKey][i] : null;
+          block.appendChild(buildScoreQuestion('score' + (sIdx + 1) + '_' + (i + 1), qText, selectedValue));
         });
         container.appendChild(block);
       });
       const freeBlock = document.createElement('div');
       freeBlock.className = 'section-block';
-      freeBlock.appendChild(buildTextArea('freeText1', items.freeText1Label));
-      freeBlock.appendChild(buildTextArea('freeText2', items.freeText2Label));
+      freeBlock.appendChild(buildTextArea('freeText1', items.freeText1Label, existing ? existing.freeText1 : ''));
+      freeBlock.appendChild(buildTextArea('freeText2', items.freeText2Label, existing ? existing.freeText2 : ''));
       container.appendChild(freeBlock);
     }
 
