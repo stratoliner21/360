@@ -27,6 +27,30 @@
     el.hidden = !message;
   }
 
+  // OSネイティブのwindow.confirm()は、Electron上でまれにレンダラーのキーボード
+  // フォーカスを奪ったまま返さないことがあるため、代わりにページ内モーダルで確認する。
+  function showConfirm(message) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('confirm-modal');
+      setText(document.getElementById('confirm-message'), message);
+      const yesBtn = document.getElementById('confirm-yes');
+      const noBtn = document.getElementById('confirm-no');
+
+      function cleanup(result) {
+        modal.hidden = true;
+        yesBtn.removeEventListener('click', onYes);
+        noBtn.removeEventListener('click', onNo);
+        resolve(result);
+      }
+      function onYes() { cleanup(true); }
+      function onNo() { cleanup(false); }
+
+      yesBtn.addEventListener('click', onYes);
+      noBtn.addEventListener('click', onNo);
+      modal.hidden = false;
+    });
+  }
+
   // ---- ログイン ----
   const loginForm = document.getElementById('login-form');
   const loginError = document.getElementById('login-error');
@@ -255,7 +279,7 @@
     let res = await window.api.call('submitEvaluation', payload);
 
     if (!res.success && res.error && res.error.code === 'DUPLICATE_SUBMISSION') {
-      const overwrite = window.confirm('この対象者へは送信済みです。内容を上書きして再送信しますか？');
+      const overwrite = await showConfirm('この対象者へは送信済みです。内容を上書きして再送信しますか？');
       if (overwrite) {
         res = await window.api.call('submitEvaluation', Object.assign({}, payload, { overwrite: true }));
       } else {
