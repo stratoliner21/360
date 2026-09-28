@@ -19,6 +19,49 @@ function loadConfig() {
   return JSON.parse(raw);
 }
 
+// リダイレクト先(script.googleusercontent.com)からの応答をJSONとして受け取る。
+// GASの結果取得用URLはGET専用で、ボディを送ってはいけない。
+function httpGetJson(urlString) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try {
+      url = new URL(urlString);
+    } catch (e) {
+      reject(new Error('リダイレクト先のURLが不正です: ' + urlString));
+      return;
+    }
+    const client = url.protocol === 'http:' ? http : https;
+    const req = client.request(
+      {
+        hostname: url.hostname,
+        port: url.port || (url.protocol === 'http:' ? 80 : 443),
+        path: url.pathname + url.search,
+        method: 'GET'
+      },
+      (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          httpGetJson(res.headers.location).then(resolve, reject);
+          return;
+        }
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch (e) {
+            reject(new Error('サーバーからの応答を解析できませんでした: ' + data.slice(0, 200)));
+          }
+        });
+      }
+    );
+    req.on('error', (err) => {
+      reject(new Error('APIサーバーへの接続に失敗しました: ' + err.message));
+    });
+    req.end();
+  });
+}
+
 function postJson(urlString, bodyObj) {
   return new Promise((resolve, reject) => {
     let url;
@@ -44,10 +87,11 @@ function postJson(urlString, bodyObj) {
         }
       },
       (res) => {
-        // GAS Web App はリダイレクト(302)を返すことがあるため追従する
+        // GAS Web App はリダイレクト(302)を返すことがあるため追従する。
+        // リダイレクト先は結果を返すだけのGET専用URLなので、ボディは送らずGETで取得する。
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume();
-          postJson(res.headers.location, bodyObj).then(resolve, reject);
+          httpGetJson(res.headers.location).then(resolve, reject);
           return;
         }
         let data = '';
