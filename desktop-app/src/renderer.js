@@ -5,6 +5,9 @@
     master: null,
     currentTarget: null
   };
+  // 開発者ツール(Ctrl+Shift+I / F12)から状態を確認できるようにする診断用の参照。
+  // 機能には影響しない。
+  window.__appState = state;
 
   const screens = {
     login: document.getElementById('screen-login'),
